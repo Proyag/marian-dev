@@ -635,6 +635,8 @@ void ConfigParser::addOptionsTranslate(po::options_description& desc) {
       "Sorting strategy for maxi-batch: none, src")
     ("n-best", po::value<bool>()->zero_tokens()->default_value(false),
       "Display n-best list")
+    ("wipo", po::value<bool>()->zero_tokens()->default_value(false),
+      "Display n-best list in WIPO format")
     ("shortlist", po::value<std::vector<std::string>>()->multitoken(),
      "Use softmax shortlist: path first best prune")
     ("weights", po::value<std::vector<float>>()->multitoken(),
@@ -941,6 +943,7 @@ void ConfigParser::parseOptions(int argc, char** argv, bool doValidate) {
     SET_OPTION("word-penalty", float);
     SET_OPTION("allow-unk", bool);
     SET_OPTION("n-best", bool);
+    SET_OPTION("wipo", bool);
     SET_OPTION("mini-batch-words", int);
     SET_OPTION_NONDEFAULT("weights", std::vector<float>);
     SET_OPTION_NONDEFAULT("shortlist", std::vector<std::string>);

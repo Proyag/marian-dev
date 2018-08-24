@@ -20,17 +20,24 @@ public:
                    ? options->get<size_t>("beam-size")
                    : 0),
         alignment_(options->get<std::string>("alignment", "")),
-        alignmentThreshold_(getAlignmentThreshold(alignment_)) {}
+        alignmentThreshold_(getAlignmentThreshold(alignment_)),
+        wipo_(options->get<bool>("wipo", false)) {}
 
   template <class OStream>
   void print(Ptr<History> history, OStream& best1, OStream& bestn) {
     const auto& nbl = history->NBest(nbest_);
 
+    if(wipo_) {
+      bestn << "OUT: " << nbl.size() << std::endl;
+    }
     for(size_t i = 0; i < nbl.size(); ++i) {
       const auto& result = nbl[i];
       const auto& words = std::get<0>(result);
       const auto& hypo = std::get<1>(result);
 
+      if(wipo_) {
+        bestn << "OUT: ";
+      }
       std::string translation = utils::Join((*vocab_)(words), " ", reverse_);
       bestn << history->GetLineNum() << " ||| " << translation;
 
@@ -74,6 +81,7 @@ private:
   size_t nbest_{0};
   std::string alignment_;
   float alignmentThreshold_{0.f};
+  bool wipo_{false};
 
   std::string getAlignment(const Ptr<Hypothesis>& hyp);
 
