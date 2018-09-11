@@ -16,10 +16,10 @@ protected:
 
 public:
   DecoderStateHardAtt(const rnn::States& states,
-                      Expr probs,
+                      Expr logProbs,
                       const std::vector<Ptr<EncoderState>>& encStates,
                       Ptr<data::CorpusBatch> batch)
-      : DecoderState(states, probs, encStates, batch) {}
+      : DecoderState(states, logProbs, encStates, batch) {}
 
   virtual Ptr<DecoderState> select(const std::vector<size_t>& selIdx,
                                    int beamSize) const override {
@@ -28,7 +28,7 @@ public:
       selectedAttentionIndices.push_back(attentionIndices_[i]);
 
     auto selectedState = New<DecoderStateHardAtt>(states_.select(selIdx, beamSize, /*isBatchMajor=*/false),
-                                    probs_,
+                                    logProbs_,
                                     encStates_,
                                     batch_);
     selectedState->attentionIndices_ = selectedAttentionIndices;
@@ -51,7 +51,7 @@ public:
     return attentionIndices_;
   }
 
-  virtual void blacklist(Expr totalCosts, Ptr<data::CorpusBatch> batch) {
+  virtual void blacklist(Expr totalCosts, Ptr<data::CorpusBatch> batch) override {
     auto attentionIdx = getAttentionIndices();
     int dimVoc = totalCosts->shape()[-1];
     for(size_t i = 0; i < attentionIdx.size(); i++) {
@@ -84,7 +84,7 @@ public:
   virtual Ptr<DecoderState> startState(
       Ptr<ExpressionGraph> graph,
       Ptr<data::CorpusBatch> batch,
-      std::vector<Ptr<EncoderState>>& encStates) {
+      std::vector<Ptr<EncoderState>>& encStates) override {
     using namespace keywords;
 
     std::vector<Expr> meanContexts;
@@ -115,7 +115,7 @@ public:
   }
 
   virtual Ptr<DecoderState> step(Ptr<ExpressionGraph> graph,
-                                 Ptr<DecoderState> state) {
+                                 Ptr<DecoderState> state) override {
     using namespace keywords;
 
     auto type = options_->get<std::string>("type");
@@ -215,7 +215,7 @@ public:
     Expr logits;
     if(type == "hard-soft-att") {
       std::vector<Expr> alignedContexts;
-      for(size_t k = 0; k < state->getEncoderStates().size(); ++k) {
+      for(int k = 0; k < state->getEncoderStates().size(); ++k) {
         // retrieve all the aligned contexts computed by the attention mechanism
         auto att = rnn_->at(0)
                        ->as<rnn::StackedCell>()
@@ -251,14 +251,14 @@ public:
 
   void embeddingsFromBatch(Ptr<ExpressionGraph> graph,
                            Ptr<DecoderState> state,
-                           Ptr<data::CorpusBatch> batch) {
+                           Ptr<data::CorpusBatch> batch) override {
     using namespace keywords;
 
     DecoderBase::embeddingsFromBatch(graph, state, batch);
 
     auto subBatch = (*batch)[batchIndex_];
-    int dimBatch = subBatch->batchSize();
-    int dimWords = subBatch->batchWidth();
+    int dimBatch = (int)subBatch->batchSize();
+    int dimWords = (int)subBatch->batchWidth();
 
     std::vector<size_t> attentionIndices(dimBatch, 0);
     std::vector<size_t> currentPos(dimBatch, 0);
@@ -281,7 +281,7 @@ public:
                                         Ptr<DecoderState> state,
                                         const std::vector<size_t>& embIdx,
                                         int dimBatch,
-                                        int beamSize) {
+                                        int beamSize) override {
     DecoderBase::embeddingsFromPrediction(
         graph, state, embIdx, dimBatch, beamSize);
 
@@ -302,6 +302,6 @@ public:
     }
   }
 
-  void clear() { rnn_ = nullptr; }
+  void clear() override { rnn_ = nullptr; }
 };
 }  // namespace marian

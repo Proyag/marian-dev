@@ -110,7 +110,7 @@ private:
     while(!maxiBatch->empty()) {
       // push item onto batch
       batchVector.push_back(maxiBatch->top());
-      currentWords += batchVector.back()[0].size();
+      currentWords += (int)batchVector.back()[0].size();
       maxiBatch->pop();
 
       // Batch size based on sentences
@@ -265,7 +265,7 @@ public:
                        Ptr<BatchStats> stats = nullptr)
       : BatchGenerator(data, options, stats) {}
 
-  void actAfterEpoch(TrainingState& state) {
+  void actAfterEpoch(TrainingState& state) override {
     state.seedBatch = getRNGState();
     state.seedCorpus = data_->getRNGState();
   }

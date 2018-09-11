@@ -15,6 +15,8 @@
 
 namespace marian {
 
+// clang-format off
+
 // shared base class for transformer-based EncoderTransformer and DecoderTransformer
 // Both classes share a lot of code. This template adds that shared code into their
 // base while still deriving from EncoderBase and DecoderBase, respectively.
@@ -25,6 +27,11 @@ class Transformer : public EncoderOrDecoderBase {
 protected:
   using Base::options_; using Base::inference_;
   std::unordered_map<std::string, Expr> cache_;
+
+  // attention weights produced by step()
+  // If enabled, it is set once per batch during training, and once per step during translation.
+  // It can be accessed by getAlignments(). @TODO: move into a state or return-value object
+  std::vector<Expr> alignments_; // [max tgt len or 1][beam depth, max src length, batch size, 1]
 
   template <typename T> T opt(const std::string& key) const { Ptr<Options> options = options_; return options->get<T>(key); }  // need to duplicate, since somehow using Base::opt is not working
   // FIXME: that separate options assignment is weird
@@ -44,7 +51,7 @@ public:
     int dimEmb   = input->shape()[-1];
     int dimWords = input->shape()[-3];
 
-    float num_timescales = dimEmb / 2;
+    float num_timescales = (float)dimEmb / 2;
     float log_timescale_increment = std::log(10000.f) / (num_timescales - 1.f);
 
     std::vector<float> vPos(dimEmb * dimWords, 0);
@@ -52,7 +59,7 @@ public:
       for(int i = 0; i < num_timescales; ++i) {
         float v = p * std::exp(i * -log_timescale_increment);
         vPos[(p - start) * dimEmb + i] = std::sin(v);
-        vPos[(p - start) * dimEmb + num_timescales + i] = std::cos(v);
+        vPos[(p - start) * dimEmb + (int)num_timescales + i] = std::cos(v); // @TODO: is int vs. float correct for num_timescales?
       }
     }
 
@@ -127,7 +134,7 @@ public:
     int dimModel = x->shape()[-1];
     auto scale = graph_->param(prefix + "_ln_scale" + suffix, { 1, dimModel }, inits::ones);
     auto bias  = graph_->param(prefix + "_ln_bias"  + suffix, { 1, dimModel }, inits::zeros);
-    return marian::layerNorm(x, scale, bias, 1e-6);
+    return marian::layerNorm(x, scale, bias, 1e-6f);
   }
 
   Expr preProcess(std::string prefix, std::string ops, Expr input, float dropProb = 0.0f) const {
@@ -169,21 +176,43 @@ public:
     return output;
   }
 
+  void collectOneHead(Expr weights, int dimBeam) {
+    // select first head, this is arbitrary as the choice does not really matter
+    auto head0 = select(weights, -3, {0}); // @TODO: implement an index() or slice() operator and use that
+
+    int dimBatchBeam = head0->shape()[-4];
+    int srcWords = head0->shape()[-1];
+    int trgWords = head0->shape()[-2];
+    int dimBatch = dimBatchBeam / dimBeam;
+
+    // reshape and transpose to match the format guided_alignment expects
+    head0 = reshape(head0, {dimBeam, dimBatch, trgWords, srcWords});
+    head0 = transpose(head0, {0, 3, 1, 2}); // [-4: beam depth, -3: max src length, -2: batch size, -1: max tgt length]
+
+    // save only last alignment set. For training this will be all alignments,
+    // for translation only the last one. Also split alignments by target words.
+    // @TODO: make splitting obsolete
+    alignments_.clear();
+    for(int i = 0; i < trgWords; ++i)
+      alignments_.push_back(select(head0, -1, {(size_t)i})); // [tgt index][-4: beam depth, -3: max src length, -2: batch size, -1: 1]
+  }
+
   // determine the multiplicative-attention probability and performs the associative lookup as well
   // q, k, and v have already been split into multiple heads, undergone any desired linear transform.
   Expr Attention(std::string prefix,
                  Expr q,              // [-4: beam depth * batch size, -3: num heads, -2: max tgt length, -1: split vector dim]
                  Expr k,              // [-4: batch size, -3: num heads, -2: max src length, -1: split vector dim]
                  Expr v,              // [-4: batch size, -3: num heads, -2: max src length, -1: split vector dim]
-                 Expr mask = nullptr) // [-4: batch size, -3: num heads broadcast=1, -2: max length broadcast=1, -1: max length]
-      const {
+                 Expr mask = nullptr, // [-4: batch size, -3: num heads broadcast=1, -2: max length broadcast=1, -1: max length]
+                 bool saveAttentionWeights = false,
+                 int dimBeam = 1) {
     int dk = k->shape()[-1];
 
     // softmax over batched dot product of query and keys (applied over all
     // time steps and batch entries), also add mask for illegal connections
 
     // multiplicative attention with flattened softmax
-    float scale = 1.0 / std::sqrt((float)dk); // scaling to avoid extreme values due to matrix multiplication
+    float scale = 1.0f / std::sqrt((float)dk); // scaling to avoid extreme values due to matrix multiplication
     auto z = bdot(q, k, false, true, scale); // [-4: beam depth * batch size, -3: num heads, -2: max tgt length, -1: max src length]
 
     // mask out garbage beyond end of sequences
@@ -191,6 +220,9 @@ public:
 
     // take softmax along src sequence axis (-1)
     auto weights = softmax(z); // [-4: beam depth * batch size, -3: num heads, -2: max tgt length, -1: max src length]
+
+    if(saveAttentionWeights)
+      collectOneHead(weights, dimBeam);
 
     // optional dropout for attention weights
     float dropProb
@@ -209,7 +241,8 @@ public:
                  const Expr &keys,   // [-4: beam depth, -3: batch size, -2: max kv length, -1: vector dim]
                  const Expr &values, // [-4: beam depth, -3: batch size, -2: max kv length, -1: vector dim]
                  const Expr &mask,   // [-4: batch size, -3: num heads broadcast=1, -2: max length broadcast=1, -1: max length]
-                 bool cache = false) {
+                 bool cache = false,
+                 bool saveAttentionWeights = false) {
     int dimModel = q->shape()[-1];
     // @TODO: good opportunity to implement auto-batching here or do something manually?
     auto Wq = graph_->param(prefix + "_Wq", {dimModel, dimModel}, inits::glorot_uniform);
@@ -245,11 +278,13 @@ public:
       vh = cache_[prefix + "_values"];
     }
 
+    int dimBeam = q->shape()[-4];
+
     // apply multi-head attention to downscaled inputs
     auto output
-        = Attention(prefix, qh, kh, vh, mask); // [-4: beam depth * batch size, -3: num heads, -2: max length, -1: split vector dim]
+        = Attention(prefix, qh, kh, vh, mask, saveAttentionWeights, dimBeam); // [-4: beam depth * batch size, -3: num heads, -2: max length, -1: split vector dim]
 
-    output = JoinHeads(output, q->shape()[-4]); // [-4: beam depth, -3: batch size, -2: max length, -1: vector dim]
+    output = JoinHeads(output, dimBeam); // [-4: beam depth, -3: batch size, -2: max length, -1: vector dim]
 
     int dimAtt = output->shape()[-1];
 
@@ -269,7 +304,8 @@ public:
                       const Expr& keys,   // [-4: beam depth=1, -3: batch size, -2: max length, -1: vector dim]
                       const Expr& values, // ...?
                       const Expr& mask,   // [-4: batch size, -3: num heads broadcast=1, -2: max length broadcast=1, -1: max length]
-                      bool cache = false) {
+                      bool cache = false,
+                      bool saveAttentionWeights = false) {
     int dimModel = input->shape()[-1];
 
     float dropProb = inference_ ? 0 : opt<float>("transformer-dropout");
@@ -279,7 +315,7 @@ public:
     auto heads = opt<int>("transformer-heads");
 
     // multi-head self-attention over previous input
-    output = MultiHead(prefix, dimModel, heads, output, keys, values, mask, cache);
+    output = MultiHead(prefix, dimModel, heads, output, keys, values, mask, cache, saveAttentionWeights);
 
     auto opsPost = opt<std::string>("transformer-postprocess");
     output = postProcess(prefix + "_Wo", opsPost, output, input, dropProb);
@@ -389,7 +425,7 @@ public:
     auto output = input;
     if(startPos > 0) {
       // we are decoding at a position after 0
-      output = (prevDecoderState.output * startPos + input) / (startPos + 1);
+      output = (prevDecoderState.output * (float)startPos + input) / float(startPos + 1);
     }
     else if(startPos == 0 && output->shape()[-2] > 1) {
       // we are training or scoring, because there is no history and
@@ -408,9 +444,7 @@ public:
                        std::string prefix,
                        Expr input,
                        Expr selfMask,
-                       int startPos) const {
-    using namespace keywords;
-
+                       int /*startPos*/) const {
     float dropoutRnn = inference_ ? 0.f : opt<float>("dropout-rnn");
 
     auto rnn = rnn::rnn(graph_)                                    //
@@ -445,7 +479,7 @@ public:
 
   // returns the embedding matrix based on options
   // and based on batchIndex_.
-  Expr wordEmbeddings(int subBatchIndex) const {
+  Expr wordEmbeddings(size_t subBatchIndex) const {
     // standard encoder word embeddings
 
     int dimVoc = opt<std::vector<int>>("dim-vocabs")[subBatchIndex];
@@ -479,8 +513,8 @@ public:
 
   Ptr<EncoderState> apply(Ptr<data::CorpusBatch> batch) {
     int dimEmb = opt<int>("dim-emb");
-    int dimBatch = batch->size();
-    int dimSrcWords = (*batch)[batchIndex_]->batchWidth();
+    int dimBatch = (int)batch->size();
+    int dimSrcWords = (int)(*batch)[batchIndex_]->batchWidth();
 
     auto embeddings = wordEmbeddings(batchIndex_); // embedding matrix, considering tying and some other options
 
@@ -497,7 +531,7 @@ public:
     }
 
     // according to paper embeddings are scaled up by \sqrt(d_m)
-    auto scaledEmbeddings = std::sqrt(dimEmb) * batchEmbeddings;
+    auto scaledEmbeddings = std::sqrt((float)dimEmb) * batchEmbeddings;
 
     scaledEmbeddings = addPositionalEmbeddings(scaledEmbeddings);
 
@@ -514,7 +548,7 @@ public:
     layer = preProcess(prefix_ + "_emb", opsEmb, layer, dropProb);
 
     layerMask = transposedLogMask(layerMask); // [-4: batch size, -3: 1, -2: vector dim=1, -1: max length]
-    
+
     // apply encoder layers
     auto encDepth = opt<int>("enc-depth");
     for(int i = 1; i <= encDepth; ++i) {
@@ -535,21 +569,21 @@ public:
     return New<EncoderState>(context, batchMask, batch);
   }
 
-  void clear() {}
+  void clear() override {}
 };
 
 class TransformerState : public DecoderState {
 public:
   TransformerState(const rnn::States& states,
-                   Expr probs,
+                   Expr logProbs,
                    const std::vector<Ptr<EncoderState>>& encStates,
                    Ptr<data::CorpusBatch> batch)
-      : DecoderState(states, probs, encStates, batch) {}
+      : DecoderState(states, logProbs, encStates, batch) {}
 
   virtual Ptr<DecoderState> select(const std::vector<size_t>& selIdx,
                                    int beamSize) const override {
     // Create hypothesis-selected state based on current state and hyp indices
-    auto selectedState = New<TransformerState>(states_.select(selIdx, beamSize, /*isBatchMajor=*/true), probs_, encStates_, batch_);
+    auto selectedState = New<TransformerState>(states_.select(selIdx, beamSize, /*isBatchMajor=*/true), logProbs_, encStates_, batch_);
 
     // Set the same target token position as the current state
     // @TODO: This is the same as in base function.
@@ -601,10 +635,9 @@ public:
       std::vector<Ptr<EncoderState>>& encStates) override {
     graph_ = graph;
 
-    using namespace keywords;
-    std::string layerType = opt<std::string>("transformer-decoder-autoreg");
+    std::string layerType = opt<std::string>("transformer-decoder-autoreg", "self-attention");
     if (layerType == "rnn") {
-      int dimBatch = batch->size();
+      int dimBatch = (int)batch->size();
       int dim = opt<int>("dim-emb");
 
       auto start = graph->constant({1, 1, dimBatch, dim}, inits::zeros);
@@ -645,12 +678,12 @@ public:
       dimBeam = embeddings->shape()[-4];
 
     // according to paper embeddings are scaled by \sqrt(d_m)
-    auto scaledEmbeddings = std::sqrt(dimEmb) * embeddings;
+    auto scaledEmbeddings = std::sqrt((float)dimEmb) * embeddings;
 
     // set current target token position during decoding or training. At training
     // this should be 0. During translation the current length of the translation.
     // Used for position embeddings and creating new decoder states.
-    int startPos = state->getPosition();
+    int startPos = (int)state->getPosition();
 
     scaledEmbeddings
       = addPositionalEmbeddings(scaledEmbeddings, startPos);
@@ -740,12 +773,30 @@ public:
           if(j > 0)
             prefix += "_enc" + std::to_string(j + 1);
 
+          // if training is performed with guided_alignment or if alignment is requested during
+          // decoding or scoring return the attention weights of one head of the last layer.
+          // @TODO: maybe allow to return average or max over all heads?
+          bool saveAttentionWeights = false;
+          if(j == 0 && (options_->has("guided-alignment") || options_->has("alignment"))) {
+            size_t attLayer = decDepth - 1;
+            std::string gaStr = options_->get<std::string>("transformer-guided-alignment-layer");
+            if(gaStr != "last")
+              attLayer = std::stoull(gaStr) - 1;
+
+            ABORT_IF(attLayer >= decDepth,
+                     "Chosen layer for guided attention ({}) larger than number of layers ({})",
+                     attLayer + 1, decDepth);
+
+            saveAttentionWeights = i == attLayer;
+          }
+
           query = LayerAttention(prefix,
                                  query,
                                  encoderContexts[j], // keys
                                  encoderContexts[j], // values
                                  encoderMasks[j],
-                                 /*cache=*/true);
+                                 /*cache=*/true,
+                                 saveAttentionWeights);
         }
       }
 
@@ -764,7 +815,7 @@ public:
 
     // return unormalized(!) probabilities
     Ptr<DecoderState> nextState;
-    if (opt<std::string>("transformer-decoder-autoreg") == "rnn") {
+    if (opt<std::string>("transformer-decoder-autoreg", "self-attention") == "rnn") {
       nextState = New<DecoderState>(
           decoderStates, logits, state->getEncoderStates(), state->getBatch());
     } else {
@@ -776,13 +827,15 @@ public:
   }
 
   // helper function for guided alignment
-  virtual const std::vector<Expr> getAlignments(int i = 0) {
-    return {};
+  // @TODO: const vector<> seems wrong. Either make it non-const or a const& (more efficient but dangerous)
+  virtual const std::vector<Expr> getAlignments(int /*i*/ = 0) override {
+    return alignments_;
   }
 
-  void clear() {
+  void clear() override {
     output_ = nullptr;
     cache_.clear();
+    alignments_.clear();
   }
 };
 
@@ -796,4 +849,7 @@ Ptr<DecoderBase> NewDecoderTransformer(Ptr<Options> options)
 {
   return New<DecoderTransformer>(options);
 }
+
+// clang-format on
+
 }  // namespace marian

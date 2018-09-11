@@ -16,7 +16,7 @@ protected:
   size_t alignment_;
 
   size_t align(size_t size) {
-    return ceil(size / (float)alignment_) * alignment_;
+    return (size_t)(ceil(size / (float)alignment_) * alignment_);
   }
 
 public:
@@ -42,7 +42,7 @@ public:
 
   ~Device();
 
-  void reserve(size_t size);
+  void reserve(size_t size) override;
 };
 }  // namespace gpu
 
@@ -54,7 +54,7 @@ public:
 
   ~Device();
 
-  void reserve(size_t size);
+  void reserve(size_t size) override;
 };
 
 class WrappedDevice : public marian::Device {
@@ -69,7 +69,7 @@ public:
   }
 
   // doesn't allocate anything, just checks size.
-  void reserve(size_t size) {
+  void reserve(size_t size) override {
     ABORT_IF(size > size_,
              "Requested size {} is larger than pre-allocated size {}",
              size,

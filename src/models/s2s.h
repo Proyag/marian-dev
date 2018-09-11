@@ -150,7 +150,7 @@ public:
   EncoderS2S(Ptr<Options> options) : EncoderBase(options) {}
 
   virtual Ptr<EncoderState> build(Ptr<ExpressionGraph> graph,
-                                  Ptr<data::CorpusBatch> batch) {
+                                  Ptr<data::CorpusBatch> batch) override {
     auto embeddings = buildSourceEmbeddings(graph);
 
     using namespace keywords;
@@ -172,7 +172,7 @@ public:
     return New<EncoderState>(context, batchMask, batch);
   }
 
-  void clear() {}
+  void clear() override {}
 };
 
 class DecoderS2S : public DecoderBase {
@@ -247,7 +247,7 @@ public:
   virtual Ptr<DecoderState> startState(
       Ptr<ExpressionGraph> graph,
       Ptr<data::CorpusBatch> batch,
-      std::vector<Ptr<EncoderState>>& encStates) {
+      std::vector<Ptr<EncoderState>>& encStates) override {
     using namespace keywords;
 
     std::vector<Expr> meanContexts;
@@ -274,7 +274,7 @@ public:
 
       start = mlp->apply(meanContexts);
     } else {
-      int dimBatch = batch->size();
+      int dimBatch = (int)batch->size();
       int dimRnn = opt<int>("dim-rnn");
 
       start = graph->constant({dimBatch, dimRnn}, inits::zeros);
@@ -285,7 +285,7 @@ public:
   }
 
   virtual Ptr<DecoderState> step(Ptr<ExpressionGraph> graph,
-                                 Ptr<DecoderState> state) {
+                                 Ptr<DecoderState> state) override {
     using namespace keywords;
 
     auto embeddings = state->getTargetEmbeddings();
@@ -309,7 +309,7 @@ public:
     rnn::States decoderStates = rnn_->lastCellStates();
 
     std::vector<Expr> alignedContexts;
-    for(size_t k = 0; k < state->getEncoderStates().size(); ++k) {
+    for(int k = 0; k < state->getEncoderStates().size(); ++k) {
       // retrieve all the aligned contexts computed by the attention mechanism
       auto att = rnn_->at(0)
                      ->as<rnn::StackedCell>()
@@ -337,7 +337,7 @@ public:
 
       int dimTrgVoc = opt<std::vector<int>>("dim-vocabs")[batchIndex_];
 
-      auto final = mlp::output(graph)           //
+      auto last = mlp::output(graph)           //
           ("prefix", prefix_ + "_ff_logit_l2")  //
           ("dim", dimTrgVoc);
 
@@ -345,17 +345,17 @@ public:
         std::string tiedPrefix = prefix_ + "_Wemb";
         if(opt<bool>("tied-embeddings-all") || opt<bool>("tied-embeddings-src"))
           tiedPrefix = "Wemb";
-        final.tie_transposed("W", tiedPrefix);
+        last.tie_transposed("W", tiedPrefix);
       }
 
       if(shortlist_)
-        final.set_shortlist(shortlist_);
+        last.set_shortlist(shortlist_);
 
       // assemble layers into MLP and apply to embeddings, decoder context and
       // aligned source context
       output_ = mlp::mlp(graph)         //
                     .push_back(hidden)  //
-                    .push_back(final)
+                    .push_back(last)
                     .construct();
     }
 
@@ -375,13 +375,13 @@ public:
   }
 
   // helper function for guided alignment
-  virtual const std::vector<Expr> getAlignments(int i = 0) {
+  virtual const std::vector<Expr> getAlignments(int i = 0) override {
     auto att
         = rnn_->at(0)->as<rnn::StackedCell>()->at(i + 1)->as<rnn::Attention>();
     return att->getAlignments();
   }
 
-  void clear() {
+  void clear() override {
     rnn_ = nullptr;
     output_ = nullptr;
   }

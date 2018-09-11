@@ -37,25 +37,25 @@ public:
     updateImpl(params, grads);
   }
 
-  virtual void init(TrainingState& state) {
+  virtual void init(TrainingState& state) override {
     eta_ = state.eta;
     multiplyFactor_ = state.factor;
   }
-  virtual void actAfterLoaded(TrainingState& state) {
+  virtual void actAfterLoaded(TrainingState& state) override {
     eta_ = state.eta;
     multiplyFactor_ = state.factor;
   }
-  virtual void actAfterEpoch(TrainingState& state) {
+  virtual void actAfterEpoch(TrainingState& state) override {
     eta_ = state.eta;
     if(state.reset)
       resetStats();
   }
-  virtual void actAfterBatches(TrainingState& state) {
+  virtual void actAfterBatches(TrainingState& state) override {
     eta_ = state.eta;
     if(state.reset)
       resetStats();
   }
-  virtual void actAfterStalled(TrainingState& state) {
+  virtual void actAfterStalled(TrainingState& state) override {
     eta_ = state.eta;
     if(state.reset)
       resetStats();
@@ -63,12 +63,12 @@ public:
 
   void setParams(const std::vector<float>& params) { parseParams(params); }
 
-  virtual void load(const std::string& name,
-                    std::vector<Ptr<OptimizerBase>> opts,
-                    std::vector<Ptr<Backend>> backends) {}
-  virtual void save(const std::string& name,
-                    std::vector<Ptr<OptimizerBase>> opts,
-                    size_t totalSize) {}
+  virtual void load(const std::string& /*name*/,
+                    std::vector<Ptr<OptimizerBase>> /*opts*/,
+                    std::vector<Ptr<Backend>> /*backends*/) {}
+  virtual void save(const std::string& /*name*/,
+                    std::vector<Ptr<OptimizerBase>> /*opts*/,
+                    size_t /*totalSize*/) {}
 
 protected:
   virtual void updateImpl(Tensor params, Tensor grads) = 0;
@@ -92,10 +92,10 @@ public:
       : OptimizerBase(eta, clipper) {}
 
 private:
-  void updateImpl(Tensor params, Tensor grads);
+  void updateImpl(Tensor params, Tensor grads) override;
 
-  virtual void parseParams(const std::vector<float>& params) {}
-  virtual void resetStats() {}
+  virtual void parseParams(const std::vector<float>& /*params*/) override {}
+  virtual void resetStats() override {}
 };
 
 /**
@@ -110,21 +110,21 @@ public:
 
   void load(const std::string& name,
             std::vector<Ptr<OptimizerBase>> opts,
-            std::vector<Ptr<Backend>> backends);
+            std::vector<Ptr<Backend>> backends) override;
   void save(const std::string& name,
             std::vector<Ptr<OptimizerBase>> opts,
-            size_t totalSize);
+            size_t totalSize) override;
 
 private:
-  void updateImpl(Tensor params, Tensor grads);
-  void resetStats();
+  void updateImpl(Tensor params, Tensor grads) override;
+  void resetStats() override;
 
-  void parseParams(const std::vector<float>& params) {
+  void parseParams(const std::vector<float>& params) override {
     if(params.size() > 0)
       eps_ = params[0];
   }
 
-  float eps_ = 1e-8;
+  float eps_ = 1e-8f;
   Ptr<TensorAllocator> alloc_;
   Tensor gt_;
 };
@@ -141,16 +141,16 @@ public:
 
   void load(const std::string& name,
             std::vector<Ptr<OptimizerBase>> opts,
-            std::vector<Ptr<Backend>> backends);
+            std::vector<Ptr<Backend>> backends) override;
   void save(const std::string& name,
             std::vector<Ptr<OptimizerBase>> opts,
-            size_t totalSize);
+            size_t totalSize) override;
 
 private:
-  void updateImpl(Tensor params, Tensor grads);
-  void resetStats();
+  void updateImpl(Tensor params, Tensor grads) override;
+  void resetStats() override;
 
-  virtual void parseParams(const std::vector<float>& params) {
+  virtual void parseParams(const std::vector<float>& params) override {
     if(params.size() > 0)
       beta1_ = params[0];
     if(params.size() > 1)
@@ -159,9 +159,9 @@ private:
       eps_ = params[2];
   }
 
-  float beta1_ = 0.9;
-  float beta2_ = 0.999;
-  float eps_ = 1e-8;
+  float beta1_ = 0.9f;
+  float beta2_ = 0.999f;
+  float eps_ = 1e-8f;
   size_t t_;
 
   Ptr<TensorAllocator> alloc_;

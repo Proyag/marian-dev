@@ -41,6 +41,7 @@ EncoderDecoder::EncoderDecoder(Ptr<Options> options)
   modelFeatures_.insert("transformer-postprocess-emb");
   modelFeatures_.insert("transformer-decoder-autoreg");
   modelFeatures_.insert("transformer-tied-layers");
+  modelFeatures_.insert("transformer-guided-alignment-layer");
 }
 
 std::vector<Ptr<EncoderBase>>& EncoderDecoder::getEncoders() {
@@ -63,8 +64,9 @@ void EncoderDecoder::createDecoderConfig(const std::string& name) {
   Config::YamlNode decoder;
   decoder["models"] = std::vector<std::string>({name});
   decoder["vocabs"] = options_->get<std::vector<std::string>>("vocabs");
-  decoder["normalize"] = opt<float>("normalize");
   decoder["beam-size"] = opt<size_t>("beam-size");
+  decoder["normalize"] = opt<float>("normalize");
+  decoder["word-penalty"] = opt<float>("word-penalty");
 
   decoder["mini-batch"] = opt<size_t>("valid-mini-batch");
   decoder["maxi-batch"] = opt<size_t>("valid-mini-batch") > 1 ? 100 : 1;
@@ -185,7 +187,7 @@ Expr EncoderDecoder::build(Ptr<ExpressionGraph> graph,
   auto state = stepAll(graph, batch, clearGraph);
 
   // returns raw logits
-  return state->getProbs();
+  return state->getLogProbs();
 }
 
 Expr EncoderDecoder::build(Ptr<ExpressionGraph> graph,

@@ -15,8 +15,8 @@ private:
   Ptr<Options> options_;
   std::vector<Ptr<Scorer>> scorers_;
   size_t beamSize_;
-  Word trgEosId_ = -1;
-  Word trgUnkId_ = -1;
+  Word trgEosId_ = (Word)-1;
+  Word trgUnkId_ = (Word)-1;
 
 public:
   BeamSearch(Ptr<Options> options,
@@ -32,7 +32,7 @@ public:
         trgUnkId_(trgUnkId) {}
 
   Beams toHyps(const std::vector<unsigned int> keys,
-               const std::vector<float> costs,
+               const std::vector<float> pathScores,
                size_t vocabSize,
                const Beams& beams,
                std::vector<Ptr<ScorerState>>& states,
@@ -49,8 +49,8 @@ public:
     for(size_t i = 0; i < keys.size(); ++i) {
       // Keys contains indices to vocab items in the entire beam.
       // Values can be between 0 and beamSize * vocabSize.
-      int embIdx = keys[i] % vocabSize;
-      int beamIdx = i / beamSize;
+      size_t embIdx = keys[i] % vocabSize;
+      auto beamIdx = i / beamSize;
 
       // Retrieve short list for final softmax (based on words aligned
       // to source sentences). If short list has been set, map the indices
@@ -63,39 +63,39 @@ public:
         auto& beam = beams[beamIdx];
         auto& newBeam = newBeams[beamIdx];
 
-        int hypIdx = keys[i] / vocabSize;
-        float cost = costs[i];
+        size_t hypIdx = keys[i] / vocabSize;
+        float pathScore = pathScores[i];
 
-        int hypIdxTrans
+        size_t hypIdxTrans
             = (hypIdx / beamSize) + (hypIdx % beamSize) * beams.size();
         if(first)
           hypIdxTrans = hypIdx;
 
-        int beamHypIdx = hypIdx % beamSize;
+        size_t beamHypIdx = hypIdx % beamSize;
         if(beamHypIdx >= (int)beam.size())
           beamHypIdx = beamHypIdx % beam.size();
 
         if(first)
           beamHypIdx = 0;
 
-        auto hyp = New<Hypothesis>(beam[beamHypIdx], embIdx, hypIdxTrans, cost);
+        auto hyp = New<Hypothesis>(beam[beamHypIdx], embIdx, hypIdxTrans, pathScore);
 
-        // Set cost breakdown for n-best lists
+        // Set score breakdown for n-best lists
         if(options_->get<bool>("n-best")) {
           std::vector<float> breakDown(states.size(), 0);
-          beam[beamHypIdx]->GetCostBreakdown().resize(states.size(), 0);
+          beam[beamHypIdx]->GetScoreBreakdown().resize(states.size(), 0);
           for(size_t j = 0; j < states.size(); ++j) {
-            int key = embIdx + hypIdxTrans * vocabSize;
+            size_t key = embIdx + hypIdxTrans * vocabSize;
             breakDown[j] = states[j]->breakDown(key)
-                           + beam[beamHypIdx]->GetCostBreakdown()[j];
+                           + beam[beamHypIdx]->GetScoreBreakdown()[j];
           }
-          hyp->GetCostBreakdown() = breakDown;
+          hyp->GetScoreBreakdown() = breakDown;
         }
 
         // Set alignments
         if(!align.empty()) {
           hyp->SetAlignment(
-              getAlignmentsForHypothesis(align, batch, beamHypIdx, beamIdx));
+              getAlignmentsForHypothesis(align, batch, (int)beamHypIdx, (int)beamIdx));
         }
 
         newBeam.push_back(hyp);
@@ -156,7 +156,7 @@ public:
   
   // main decoding function
   Histories search(Ptr<ExpressionGraph> graph, Ptr<data::CorpusBatch> batch) {
-    int dimBatch = batch->size();
+    int dimBatch = (int)batch->size();
 
     Histories histories;
     for(int i = 0; i < dimBatch; ++i) {
@@ -201,18 +201,18 @@ public:
     // main loop over output tokens
     do {
       //**********************************************************************
-      // create constant containing previous path costs for current beam
+      // create constant containing previous path scores for current beam
       // also create mapping of hyp indices, which are not 1:1 if sentences complete
       std::vector<size_t> hypIndices; // [beamIndex * activeBatchSize + batchIndex] backpointers, concatenated over beam positions. Used for reordering hypotheses
       std::vector<size_t> embIndices;
-      Expr prevCosts; // [beam, 1, 1, 1]
+      Expr prevPathScores; // [beam, 1, 1, 1]
       if(first) {
-        // no cost
-        prevCosts = graph->constant({1, 1, 1, 1}, inits::from_value(0));
+        // no scores yet
+        prevPathScores = graph->constant({1, 1, 1, 1}, inits::from_value(0));
       } else {
-        std::vector<float> beamCosts;
+        std::vector<float> beamScores;
 
-        int dimBatch = batch->size();
+        dimBatch = (int)batch->size();
 
         for(size_t i = 0; i < localBeamSize; ++i) {
           for(size_t j = 0; j < beams.size(); ++j) { // loop over batch entries (active sentences)
@@ -221,40 +221,36 @@ public:
               auto hyp = beam[i];
               hypIndices.push_back(hyp->GetPrevStateIndex()); // backpointer
               embIndices.push_back(hyp->GetWord());
-              beamCosts.push_back(hyp->GetCost());
+              beamScores.push_back(hyp->GetPathScore());
             } else {  // dummy hypothesis
               hypIndices.push_back(0);
               embIndices.push_back(0);  // (unused)
-              beamCosts.push_back(-9999);
+              beamScores.push_back(-9999);
             }
           }
         }
 
-        prevCosts = graph->constant({(int)localBeamSize, 1, dimBatch, 1},
-                                    inits::from_vector(beamCosts));
+        prevPathScores = graph->constant({(int)localBeamSize, 1, dimBatch, 1},
+                                    inits::from_vector(beamScores));
       }
 
       //**********************************************************************
-      // prepare costs for beam search
-      auto totalCosts = prevCosts;
-      // BUGBUG: it's not cost but score (higher=better)
+      // prepare scores for beam search
+      auto pathScores = prevPathScores;
 
       for(size_t i = 0; i < scorers_.size(); ++i) {
         states[i] = scorers_[i]->step(
-            graph, states[i], hypIndices, embIndices, dimBatch, localBeamSize);
+            graph, states[i], hypIndices, embIndices, dimBatch, (int)localBeamSize);
 
         if(scorers_[i]->getWeight() != 1.f)
-          totalCosts
-              = totalCosts + scorers_[i]->getWeight() * states[i]->getProbs();
+          pathScores = pathScores + scorers_[i]->getWeight() * states[i]->getLogProbs();
         else
-          totalCosts = totalCosts + states[i]->getProbs();
-        // BUGBUG: getProbs() -> getLogProbs(); totalCosts -> totalScores
-        // (higher=better)
+          pathScores = pathScores + states[i]->getLogProbs();
       }
 
       // make beams continuous
       if(dimBatch > 1 && localBeamSize > 1)
-        totalCosts = transpose(totalCosts, {2, 1, 0, 3});
+        pathScores = transpose(pathScores, {2, 1, 0, 3});
 
       if(first)
         graph->forward();
@@ -265,21 +261,21 @@ public:
       // suppress specific symbols if not at right positions
       if(trgUnkId_ != -1 && options_->has("allow-unk")
          && !options_->get<bool>("allow-unk"))
-        suppressWord(totalCosts, trgUnkId_);
+        suppressWord(pathScores, trgUnkId_);
       for(auto state : states)
-        state->blacklist(totalCosts, batch);
+        state->blacklist(pathScores, batch);
 
       //**********************************************************************
       // perform beam search and pruning
       std::vector<unsigned int> outKeys;
-      std::vector<float> outCosts;
+      std::vector<float> outPathScores;
 
       std::vector<size_t> beamSizes(dimBatch, localBeamSize);
-      nth->getNBestList(beamSizes, totalCosts->val(), outCosts, outKeys, first);
+      nth->getNBestList(beamSizes, pathScores->val(), outPathScores, outKeys, first);
 
-      int dimTrgVoc = totalCosts->shape()[-1];
+      int dimTrgVoc = pathScores->shape()[-1];
       beams = toHyps(outKeys,
-                     outCosts,
+                     outPathScores,
                      dimTrgVoc,
                      beams,
                      states,
@@ -304,7 +300,7 @@ public:
       if(!first) {
         size_t maxBeam = 0;
         for(auto& beam : beams)
-          if(beam.size() > maxBeam) // QUESTION: Can this ever be != 0 and != beamSize_?
+          if(beam.size() > maxBeam)
             maxBeam = beam.size();
         localBeamSize = maxBeam;
       }

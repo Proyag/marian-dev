@@ -61,7 +61,7 @@ public:
         shared_(shared),
         gen_(rd_()) {}
 
-  virtual Ptr<Shortlist> generate(Ptr<data::CorpusBatch> batch) {
+  virtual Ptr<Shortlist> generate(Ptr<data::CorpusBatch> batch) override {
     auto srcBatch = (*batch)[srcIdx_];
     auto trgBatch = (*batch)[trgIdx_];
 
@@ -79,7 +79,7 @@ public:
       for(auto i : srcBatch->data())
         idxSet.insert(i);
 
-    std::uniform_int_distribution<> dis(firstNum_, maxVocab_);
+    std::uniform_int_distribution<> dis((int)firstNum_, (int)maxVocab_);
     while(idxSet.size() < total_ && idxSet.size() < maxVocab_)
       idxSet.insert(dis(gen_));
 
@@ -196,7 +196,7 @@ public:
     prune(threshold);
   }
 
-  virtual Ptr<Shortlist> generate(Ptr<data::CorpusBatch> batch) {
+  virtual Ptr<Shortlist> generate(Ptr<data::CorpusBatch> batch) override {
     auto srcBatch = (*batch)[srcIdx_];
     // auto trgBatch = (*batch)[trgIdx_];
 
@@ -260,7 +260,7 @@ public:
     }
   }
 
-  Ptr<Shortlist> generate(Ptr<data::CorpusBatch> batch) {
+  Ptr<Shortlist> generate(Ptr<data::CorpusBatch> batch) override {
     std::vector<Word> tmp;
     return New<Shortlist>(idx_, tmp, reverseIdx_);
   }
