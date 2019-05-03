@@ -17,6 +17,8 @@ void zeros(Tensor t);
 
 void ones(Tensor t);
 
+NodeInitializer zipf(float k = 0.0001f);
+
 NodeInitializer from_value(float v);
 
 NodeInitializer eye(float val = 1.f);

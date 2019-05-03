@@ -182,7 +182,7 @@ public:
         else // this is the regular case:
           Wt_ = graph_->param(name + "_Wt", {dim, input->shape()[-1]}, inits::glorot_uniform2(/*fanIn=*/false, /*fanOut=*/true)); // @TODO: unify initializers, already done in other branch
       }
-      b_ = graph_->param(name + "_b", {1, dim}, inits::zeros);
+      b_ = graph_->param(name + "_b", {1, dim}, inits::zipf(0.0001f));
     }
 
     if (shortlist_) {

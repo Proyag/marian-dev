@@ -19,6 +19,20 @@ void ones(Tensor t) {
   t->set(1.0f);
 }
 
+NodeInitializer zipf(float k) {
+  return [k](Tensor t) {
+    ABORT_IF(t->shape().size() == 2 && t->shape()[-2] != 1,
+             "only for linear tensors of shape 1xdim, shape is {}",
+             t->shape());
+
+    std::vector<float> vec(t->size(), k);
+    for(int i = 0; i < t->shape()[-1]; ++i) {
+      vec[i] *= (t->shape()[-1] - i);
+    }
+    t->set(vec);
+  };
+}
+
 NodeInitializer from_value(float v) {
   return [v](Tensor t) { t->set(v); };
 }
