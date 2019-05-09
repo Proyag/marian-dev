@@ -11,6 +11,7 @@
 #include "models/nematus.h"
 #include "models/s2s.h"
 #include "models/transformer_factory.h"
+#include "models/sutskever.h"
 
 #ifdef CUDNN
 #include "models/char_s2s.h"
@@ -30,6 +31,9 @@ Ptr<EncoderBase> EncoderFactory::construct(Ptr<ExpressionGraph> graph) {
   if(options_->get<std::string>("type") == "s2s")
     return New<EncoderS2S>(options_);
 
+  if(options_->get<std::string>("type") == "sutskever")
+    return New<EncoderSutskever>(options_);
+
 #ifdef CUDNN
   if(options_->get<std::string>("type") == "char-s2s")
     return New<CharS2SEncoder>(options_);
@@ -47,6 +51,8 @@ Ptr<EncoderBase> EncoderFactory::construct(Ptr<ExpressionGraph> graph) {
 Ptr<DecoderBase> DecoderFactory::construct(Ptr<ExpressionGraph> graph) {
   if(options_->get<std::string>("type") == "s2s")
     return New<DecoderS2S>(options_);
+  if(options_->get<std::string>("type") == "sutskever")
+    return New<DecoderSutskever>(options_);
   if(options_->get<std::string>("type") == "transformer")
     return NewDecoderTransformer(options_);
   ABORT("Unknown decoder type");
@@ -109,6 +115,14 @@ Ptr<ModelBase> by_type(std::string type, usage use, Ptr<Options> options) {
             .push_back(models::encoder()("type", "s2s"))
             .push_back(models::decoder()("type", "s2s"))
             .construct(graph);
+  }
+
+  if(type == "sutskever") {
+    return models::encoder_decoder()(options)
+        ("usage", use)
+        .push_back(models::encoder()("type", "sutskever"))
+        .push_back(models::decoder()("type", "sutskever"))
+        .construct(graph);
   }
 
   if(type == "transformer") {
