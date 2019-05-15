@@ -54,9 +54,8 @@ public:
       Ptr<ExpressionGraph> graph,
       Ptr<data::CorpusBatch> batch,
       std::vector<Ptr<EncoderState>>& encStates) override {
-    // Use first encoded word as start state
-    // Is there really no easier way to get the 0th index?
-    auto start = slice(encStates[0]->getContext(), /*axis=*/0, Slice(0,1));
+    // Use last encoded word as start state
+    auto start = slice(encStates[0]->getContext(), /*axis=*/0, 0);
 
     rnn::States startStates({ {start, start} });
     return New<DecoderState>(startStates, nullptr, encStates, batch);
