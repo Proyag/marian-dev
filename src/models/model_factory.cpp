@@ -12,6 +12,7 @@
 #include "models/s2s.h"
 #include "models/laser.h"
 #include "models/transformer_factory.h"
+#include "models/sutskever.h"
 
 #ifdef CUDNN
 #include "models/char_s2s.h"
@@ -51,6 +52,8 @@ Ptr<EncoderBase> EncoderFactory::construct(Ptr<ExpressionGraph> graph) {
 Ptr<DecoderBase> DecoderFactory::construct(Ptr<ExpressionGraph> graph) {
   if(options_->get<std::string>("type") == "s2s")
     return New<DecoderS2S>(graph, options_);
+  if(options_->get<std::string>("type") == "sutskever")
+    return New<DecoderSutskever>(graph, options_);
   if(options_->get<std::string>("type") == "transformer")
     return NewDecoderTransformer(graph, options_);
   ABORT("Unknown decoder type");
@@ -180,6 +183,14 @@ Ptr<IModel> createBaseModelByType(std::string type, usage use, Ptr<Options> opti
          "original-type", type))
         .push_back(models::encoder()("type", "s2s"))
         .push_back(models::decoder()("type", "s2s"))
+        .construct(graph);
+  }
+
+  else if(type == "sutskever") {
+    return models::encoder_decoder()(options)
+        ("usage", use)
+        .push_back(models::encoder()("type", "s2s"))
+        .push_back(models::decoder()("type", "sutskever"))
         .construct(graph);
   }
 
