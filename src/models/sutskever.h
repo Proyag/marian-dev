@@ -62,7 +62,8 @@ private:
   }
 
 public:
-  DecoderSutskever(Ptr<Options> options) : DecoderBase(options) {}
+  DecoderSutskever(Ptr<ExpressionGraph> graph, Ptr<Options> options) :
+    DecoderBase(graph, options) {}
 
   virtual Ptr<DecoderState> startState(
       Ptr<ExpressionGraph> graph,
@@ -98,17 +99,17 @@ public:
       int dimBatch = (int)batch->size();
       int dimRnn = opt<int>("dim-rnn");
 
-      start = graph->constant({dimBatch, dimRnn}, inits::zeros);
+      start = graph->constant({dimBatch, dimRnn}, inits::zeros());
     }
 
     rnn::States startStates(opt<size_t>("dec-depth"), {start, start});
-    return New<DecoderState>(startStates, nullptr, encStates, batch);
+    return New<DecoderState>(startStates, Logits(), encStates, batch);
   }
 
   virtual Ptr<DecoderState> step(Ptr<ExpressionGraph> graph,
                                  Ptr<DecoderState> state) override {
 
-    auto embeddings = state->getTargetEmbeddings();
+    auto embeddings = state->getTargetHistoryEmbeddings();
 
     // dropout target words
     float dropoutTrg = inference_ ? 0 : opt<float>("dropout-trg");
@@ -133,7 +134,7 @@ public:
       auto hidden = mlp::dense()                                     //
           ("prefix", prefix_ + "_ff_logit_l1")                       //
           ("dim", opt<int>("dim-emb"))                               //
-          ("activation", mlp::act::tanh)                             //
+          ("activation", (int)mlp::act::tanh)                        //
           ("layer-normalization", opt<bool>("layer-normalization"))  //
           ("nematus-normalization",
             options_->has("original-type")
@@ -163,7 +164,7 @@ public:
                     .construct(graph);
     }
 
-    Expr logits = output_->apply(embeddings, decoderContext);
+    Logits logits = output_->applyAsLogits({embeddings, decoderContext});
 
     // return unnormalized(!) probabilities
     auto nextState = New<DecoderState>(
