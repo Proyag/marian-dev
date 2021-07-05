@@ -226,7 +226,11 @@ if (NOT COMPILE_LIBRARY_ONLY)
   set_target_properties(marian_conv PROPERTIES OUTPUT_NAME marian-conv)
   target_compile_options(marian_conv PRIVATE ${ALL_WARNINGS})
 
-  set(EXECUTABLES ${EXECUTABLES} marian_train marian_decoder marian_scorer marian_vocab marian_conv)
+  add_executable(marian_embedder command/marian_embedder.cpp)
+  set_target_properties(marian_embedder PROPERTIES OUTPUT_NAME marian-embedder)
+  target_compile_options(marian_embedder PRIVATE ${ALL_WARNINGS})
+
+  set(EXECUTABLES ${EXECUTABLES} marian_train marian_decoder marian_scorer marian_vocab marian_conv marian_embedder)
 
   # marian.zip and marian.tgz
   # This combines marian, marian_decoder in a single ZIP or TAR file for
