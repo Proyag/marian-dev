@@ -29,7 +29,7 @@ namespace marian {
 namespace models {
 
 Ptr<EncoderBase> EncoderFactory::construct(Ptr<ExpressionGraph> graph) {
-  if(options_->get<std::string>("type") == "s2s")
+  if(options_->get<std::string>("type") == "s2s" || options_->get<std::string>("type") == "sutskever")
     return New<EncoderS2S>(graph, options_);
   
   if(options_->get<std::string>("type") == "laser" || options_->get<std::string>("type") == "laser-sim")
@@ -187,8 +187,9 @@ Ptr<IModel> createBaseModelByType(std::string type, usage use, Ptr<Options> opti
   }
 
   else if(type == "sutskever") {
-    return models::encoder_decoder()(options)
-        ("usage", use)
+    return models::encoder_decoder()(options->with(
+        "usage", use,
+        "original-type", type))
         .push_back(models::encoder()("type", "s2s"))
         .push_back(models::decoder()("type", "sutskever"))
         .construct(graph);

@@ -200,6 +200,9 @@ void ConfigParser::addOptionsModel(cli::CLIWrapper& cli) {
       0);
   cli.add<int>("--dim-rnn",
       "Size of rnn hidden state", 1024);
+  cli.add<int>("--dim-bottleneck",
+      "Size of final bottleneck layer for sutskever/s2s encoder context, 0 means no bottleneck layer",
+      0);
   cli.add<std::string>("--enc-type",
       "Type of encoder RNN : bidirectional, bi-unidirectional, alternating (s2s)",
       "bidirectional");

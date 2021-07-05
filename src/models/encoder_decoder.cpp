@@ -15,6 +15,7 @@ EncoderDecoder::EncoderDecoder(Ptr<ExpressionGraph> graph, Ptr<Options> options)
      "dim-vocabs",
      "dim-emb",
      "dim-rnn",
+     "dim-bottleneck",
      "enc-cell",
      "enc-type",
      "enc-cell-depth",

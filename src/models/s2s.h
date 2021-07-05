@@ -118,6 +118,26 @@ public:
       // transduce context to new context
       context = rnnUni.construct(graph)->transduce(context);
     }
+
+    int dimBottleneck = opt<int>("dim-bottleneck");
+    if(dimBottleneck > 0) {
+      // Bottleneck layer to generate small representation for cheat codes
+      auto mlp = mlp::mlp().push_back(
+          mlp::dense()                                               //
+          ("prefix", prefix_ + "_bottleneck")                        //
+          ("dim", dimBottleneck)                                     //
+          ("activation", (int)mlp::act::tanh)                        //
+          ("layer-normalization", opt<bool>("layer-normalization"))  //
+          ("nematus-normalization",
+          options_->has("original-type")
+               && opt<std::string>("original-type") == "nematus")  //
+      )
+      .construct(graph);
+
+      // Apply bottleneck layer
+      context = mlp->apply(context);
+    }
+
     return context;
   }
 

@@ -97,6 +97,7 @@ public:
                     "dim-vocabs",
                     "dim-emb",
                     "dim-rnn",
+                    "dim-bottleneck",
                     "enc-cell",
                     "enc-type",
                     "enc-cell-depth",
